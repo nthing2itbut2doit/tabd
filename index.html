@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tabd — v1.4.1</title>
+
+  <!-- Typography: Geometric (DM Sans), Humanist (Inter), Monospace (JetBrains Mono) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-theme="slate">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brandTop">
+        <img class="logo" src="assets/tabd_logo_pick.png" alt="Tabd logo" />
+        <div class="wordmark">Tabd</div>
+        <div class="pill">.tabd</div>
+        <!-- subtitle removed; theme + version live in footer -->
+      </div>
+
+      <div class="docContext">
+        <div class="group">
+          <label class="lbl">Instrument</label>
+          <select id="instrumentSelect" class="select">
+            <option value="guitar">Guitar</option>
+            <option value="bass">Bass</option>
+          </select>
+        </div>
+
+        <div class="group">
+          <label class="lbl">Tuning</label>
+          <select id="tuningSelect" class="select"></select>
+        </div>
+
+        <div class="group">
+          <label class="lbl">Capo</label>
+          <input id="capoInput" class="input" type="number" min="0" max="12" value="0" />
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="group">
+        <label class="lbl">Notes</label>
+        <div class="seg" id="notesMode">
+          <button data-mode="off">Off</button>
+          <button data-mode="hover" class="active">Hover</button>
+          <button data-mode="board">Board</button>
+        </div>
+      </div>
+
+      <div class="group" id="interpretGroup">
+        <label class="lbl">Interpret</label>
+        <div class="seg" id="notesInterpret" aria-label="Interpret notes as fingered or sounding">
+          <button data-mode="fingered" class="active">Fingered</button>
+          <button data-mode="sounding">Sounding</button>
+        </div>
+      </div>
+
+      <div class="group chordHintWrap" id="chordsGroup">
+        <label class="lbl">Chords</label>
+        <div class="seg chordSeg" id="chordsMode">
+          <button data-mode="off" class="active">Off</button>
+          <button data-mode="hover">Hover</button>
+        </div>
+      </div>
+
+      <div class="group actions">
+        <button id="newBtn" class="btn">New</button>
+        <button id="saveBtn" class="btn">Save .tabd</button>
+        <button id="openBtn" class="btn">Open</button>
+        <button id="exportBtn" class="btn primary">Export .txt</button>
+        <button id="addColsBtn" class="btn">+16 cols</button>
+        <input id="openFile" type="file" accept=".tabd,.json" hidden />
+      </div>
+    </div>
+  </header>
+
+  <main class="main">
+    <section class="canvasWrap">
+      <canvas id="editor" width="1400" height="620"></canvas>
+      <div id="tooltip" class="tooltip" style="display:none"></div>
+    </section>
+
+    <section class="status">
+      <div class="statusLeft">
+        <span class="badge">Keys</span>
+        <span class="hint" id="keysHint">↑↓←→: Navigate · Tab: Next column · Delete: Erase selection · D: Down strum · U: Up strum · X: Mute · H: Hammer-on · P: Pull-off · B: Bend · S: Slide · /: Slide up · \\: Slide down</span>
+      </div>
+      <div class="statusRight">
+        <span class="badge">Cursor</span>
+        <span id="cursorReadout" class="mono"></span>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footerBar">
+    <div class="footerLeft">
+      <div class="footerControls">
+        <button id="themeBtn" class="themeBtn" aria-haspopup="true" aria-expanded="false">
+          Theme: <span id="themeName">Slate</span> <span class="caret">▾</span>
+        </button>
+
+        <button id="aboutBtn" class="themeBtn" type="button">About</button>
+      </div>
+      <div id="themeMenu" class="themeMenu" hidden>
+        <button class="themeItem" data-theme="slate">Slate</button>
+        <button class="themeItem" data-theme="paper">Cream</button>
+      </div>
+
+      <div class="footerMeta mono small" id="footerMeta">Tabd v1.4.1 · © 2026 TaoTech LLC</div>
+    </div>
+  </footer>
+
+  <div id="aboutModal" class="modal" hidden aria-hidden="true">
+    <div class="modalBackdrop" data-close="1"></div>
+    <div class="modalPanel" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
+      <div class="modalHeader">
+        <h2 id="aboutTitle">Tabd. A musician’s tablature editor.</h2>
+        <button class="iconBtn" id="aboutClose" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modalBody">
+        <h3>Why</h3>
+        <p>Writing tabs by hand is messy, and word processors are slow. Many tab apps prioritize playback and features over writing speed. Tabd is built for fast, clean capture—so you can sit with your guitar and document ideas quickly, even one-handed.</p>
+
+        <h3>What it does</h3>
+        <ul>
+          <li>Write tabs fast and export them cleanly for printing.</li>
+          <li><strong>Note Board</strong> shows the notes you’re sounding as you type, so you can see the musical shape of what you’re writing.</li>
+          <li><strong>Chord labels</strong> are inferred from the notes in each column. This can reveal moments where familiar shapes produce unexpected harmony.</li>
+        </ul>
+
+        <h3>Contact</h3>
+        <p>Suggestions and quality-of-life requests are welcome. Email: <a href="mailto:tabd@taotech.dev">tabd@taotech.dev</a></p>
+        <p class="sig">— Tabd Team</p>
+
+        <div class="divider"></div>
+        <p class="small muted"><strong>More from TaoTech LLC</strong><br/>Tabd is one of many TaoTech projects. Have a problem you wish had a simple tool? Email: <a href="mailto:projects@taotech.dev">projects@taotech.dev</a></p>
+      </div>
+    </div>
+  </div>
+
+  <div id="uiTip" class="uiTip" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
