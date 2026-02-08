@@ -212,6 +212,7 @@ function newDoc(instrumentType='guitar', tuningName=null) {
   const columns = Array.from({ length: 64 }, () => ({ notes: {}, strum: '' }));
 
   return {
+    format: 'TabdProject',
     tabd: { appVersion: APP_VERSION, formatVersion: APP_FORMAT_VERSION, minAppVersion: '1.0.0', createdUtc: new Date().toISOString(), modifiedUtc: new Date().toISOString() },
     meta: { title: 'Untitled' },
     instrument: { type: instrumentType, strings, tuningName: tn },
