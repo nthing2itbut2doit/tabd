@@ -67,7 +67,7 @@ These tools can reveal moments where comfortable hand positions produce unexpect
 ### Hosted version (recommended)
 Use the live web app:
 ```
-https://tabd.taotech.dev
+https://tabd.rumstok.com
 ```
 
 ### Run locally
@@ -114,17 +114,17 @@ Plain ASCII tablature suitable for printing or sharing.
 Tabd is an evolving project.  
 Thoughts, suggestions, or quality-of-life ideas are always welcome.
 
-📧 **tabd@taotech.dev**
+📧 **tabd@rumstok.com**
 
 ---
 
-## About TaoTech
+## About Rumstok
 
-Tabd is one of several projects created by **TaoTech**, spanning a mix of practical tools, experiments, and occasionally silly ideas that keep our brains busy solving problems.
+Tabd is one of several projects created by **Rumstok**, spanning a mix of practical tools, experiments, and occasionally silly ideas that keep our brains busy solving problems.
 
 If you have a problem you wish had a simpler tool — or an idea you can’t shake — feel free to reach out:
 
-📧 **projects@taotech.dev**
+📧 **projects@rumstok.com**
 
 ---
 

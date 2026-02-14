@@ -220,6 +220,7 @@ function newDoc(instrumentType='guitar', tuningName=null) {
     // Default: show Note Board (helps composition decisions without extra toggling)
     view: { notesMode: 'board', notesInterpretation: 'fingered', chordsMode: 'off' },
     columns,
+    markers: [],
   };
 }
 
@@ -299,6 +300,8 @@ const saveBtn = document.getElementById('saveBtn');
 const openBtn = document.getElementById('openBtn');
 const exportBtn = document.getElementById('exportBtn');
 const addColsBtn = document.getElementById('addColsBtn');
+const addDividerBtn = document.getElementById('addDividerBtn');
+const addMarkerBtn = document.getElementById('addMarkerBtn');
 const openFile = document.getElementById('openFile');
 
 const modeBadge = document.getElementById('modeBadge');
@@ -329,6 +332,71 @@ let doc = newDoc('guitar');
 
 // Editor state
 let cursor = { lane: 'tab', row: 0, col: 0 }; // lane: 'strum'|'tab'
+let colSel = null; // { startCol:int, endCol:int }
+
+function ensureMarkers() {
+  if (!doc.markers) doc.markers = [];
+}
+function nextMarkerId() {
+  ensureMarkers();
+  const n = doc.markers.reduce((mx, m) => Math.max(mx, (m && m.id) ? Number(m.id) : 0), 0);
+  return n + 1;
+}
+function shiftMarkers(fromCol, delta) {
+  ensureMarkers();
+  if (!delta) return;
+  for (const m of doc.markers) {
+    if (!m) continue;
+    if (m.col >= fromCol) m.col += delta;
+  }
+}
+function removeMarkersInRange(startCol, endCol) {
+  ensureMarkers();
+  doc.markers = doc.markers.filter(m => m && (m.col < startCol || m.col > endCol));
+}
+function markerHit(mx, my) {
+  // Detect clicks in the gap between strum lane and first string row
+  const marginL = 54;
+  const marginT = 18;
+  const rowH = 34;
+  const laneGap = 14;
+  const strumH = 30;
+  const yStrumTop = marginT;
+  const yTabTop = yStrumTop + strumH + laneGap;
+  const bandTop = yStrumTop + strumH;
+  const bandBot = yTabTop;
+  if (my < bandTop || my > bandBot) return null;
+
+  const { widths: colPx } = buildColumnPixelWidths(22); // fontTab default used in render
+  // Find column by x
+  let x0 = marginL;
+  for (let c = 0; c < colPx.length; c++) {
+    const w = colPx[c];
+    if (mx >= x0 && mx <= x0 + w) {
+      // find marker at this column
+      ensureMarkers();
+      for (const m of doc.markers) {
+        if (m && m.col === c) return { marker: m, col: c };
+      }
+      return null;
+    }
+    x0 += w;
+  }
+  return null;
+}
+
+let colClip = null; // Array of column objects for copy/paste
+function hasClip(){ return Array.isArray(colClip) && colClip.length>0; }
+let _mouseDown = false;
+let _dragging = false;
+let _downHit = null;
+let _downX = 0;
+let _downY = 0;
+const _DRAG_THRESH_PX = 6;
+
+function clearColSel() {
+  colSel = null;
+}
 let chordStack = false;
 let insertMode = false; // placeholder (UI badge only)
 
@@ -441,6 +509,7 @@ function updateModeBadge() {
 function colCharWidth(colIdx) {
   // width in chars = max token length in that column (notes + strum + note-board tokens)
   const col = doc.columns[colIdx];
+  if (col && col.divider) return 1;
   let w = 1;
   // strum token width
   if (col.strum) w = Math.max(w, String(col.strum).length);
@@ -539,6 +608,44 @@ function render() {
   ctx.fillStyle = COLORS.accent2;
   ctx.fillRect(xCursorCol, 0, xCursorW, desiredHeight);
 
+  // Column selection glow (drag-select range)
+  if (colSel && typeof colSel.startCol === 'number' && typeof colSel.endCol === 'number') {
+    const sCol = Math.max(0, Math.min(colSel.startCol, colSel.endCol));
+    const eCol = Math.max(0, Math.max(colSel.startCol, colSel.endCol));
+    const xSel = colStartX(colPx, sCol, marginL);
+    const xEnd = colStartX(colPx, eCol, marginL) + (colPx[eCol] || colPx[0] || 0);
+
+    // Soft fill + edge glow using the existing accent color.
+    const stroke = COLORS.accent;
+    let fill = 'rgba(255,255,255,0.08)';
+    // Try to convert hex to rgba.
+    if (typeof stroke === 'string' && stroke[0] === '#' && (stroke.length === 7 || stroke.length === 4)) {
+      const hex = stroke.length === 4
+        ? '#' + stroke[1] + stroke[1] + stroke[2] + stroke[2] + stroke[3] + stroke[3]
+        : stroke;
+      const r = parseInt(hex.slice(1,3), 16);
+      const g = parseInt(hex.slice(3,5), 16);
+      const b = parseInt(hex.slice(5,7), 16);
+      fill = `rgba(${r},${g},${b},0.14)`;
+    }
+
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.fillRect(xSel, 0, Math.max(0, xEnd - xSel), desiredHeight);
+
+    ctx.strokeStyle = stroke;
+    ctx.lineWidth = 2;
+    // outer rect stroke
+    ctx.strokeRect(xSel + 1, 1, Math.max(0, xEnd - xSel - 2), desiredHeight - 2);
+
+    // subtle glow
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = 6;
+    ctx.strokeRect(xSel + 3, 3, Math.max(0, xEnd - xSel - 6), desiredHeight - 6);
+    ctx.restore();
+  }
+
+
   // Draw grid outlines
   ctx.strokeStyle = COLORS.border;
   ctx.lineWidth = 1;
@@ -568,21 +675,34 @@ function render() {
   for (let c = visible.start; c < visible.end; c++) {
     const x = colStartX(colPx, c, marginL);
     const w = colPx[c];
+    const colObj = doc.columns[c];
 
     // cell rect
     ctx.strokeRect(x, yStrumTop, w, strumH);
+
+    if (colObj && colObj.divider) {
+      // Divider column
+      ctx.font = `600 ${fontTab}px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+      ctx.fillStyle = COLORS.text2;
+      drawCenteredText('|', x, yStrumTop, w, strumH);
+      continue;
+    }
 
     // background dashes
     drawCellDashes(x, yStrumTop, w, strumH, charW);
 
     // strum token
-    const s = doc.columns[c].strum || '';
+    const s = (colObj && colObj.strum) || '';
     if (s) {
       ctx.font = `600 ${fontTab}px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.fillStyle = COLORS.text;
       drawCenteredText(s, x, yStrumTop, w, strumH);
     }
   }
+
+
+  // Markers (lightweight labels anchored to a column)
+  renderMarkers(colPx, marginL, yTabTop - 6, charW, fontTab);
 
   // Tab rows
   for (let r = 0; r < tabRows; r++) {
@@ -596,7 +716,15 @@ function render() {
       ctx.strokeRect(x, y, w, rowH);
       drawCellDashes(x, y, w, rowH, charW);
 
-      const tok = doc.columns[c].notes[stringLabel];
+
+      const colObj = doc.columns[c];
+      if (colObj && colObj.divider) {
+        ctx.font = `600 ${fontTab}px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
+        ctx.fillStyle = COLORS.text2;
+        drawCenteredText('|', x, y, w, rowH);
+        continue;
+      }
+      const tok = colObj.notes[stringLabel];
       if (tok != null && String(tok).trim() !== '') {
         ctx.font = `500 ${fontTab}px "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
         ctx.fillStyle = COLORS.text;
@@ -746,6 +874,22 @@ function drawCenteredText(text, x, y, w, h) {
   ctx.fillText(text, tx, ty);
 }
 
+
+function renderMarkers(colPx, marginL, yBase, charW, fontSize) {
+  if (!doc.markers || doc.markers.length === 0) return;
+  ctx.font = `600 ${Math.max(11, fontSize - 4)}px "DM Sans", "Inter", ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial`;
+  ctx.fillStyle = COLORS.text2;
+  for (const m of doc.markers) {
+    if (!m) continue;
+    const c = clamp(m.col, 0, doc.columns.length - 1);
+    const x = colStartX(colPx, c, marginL);
+    const w = colPx[c];
+    const label = (m.name || '').trim();
+    if (!label) continue;
+    // draw label slightly above the strum/tab gap
+    ctx.fillText(label, x + 4, yBase);
+  }
+}
 function drawPill(text, x, y, bg, highlight = 0) {
   ctx.save();
   ctx.font = `600 12px "Inter", system-ui, -apple-system, Segoe UI, Roboto, sans-serif`;
@@ -899,8 +1043,9 @@ function clearDigitBuffer() {
 }
 
 function applyToken(token) {
-  pushHistory();
   const c = cursor.col;
+  if (doc.columns[c] && doc.columns[c].divider) return;
+  pushHistory();
   if (cursor.lane === 'strum') {
     doc.columns[c].strum = token;
   } else {
@@ -916,8 +1061,9 @@ function applyToken(token) {
 }
 
 function clearCell() {
-  pushHistory();
   const c = cursor.col;
+  if (doc.columns[c] && doc.columns[c].divider) return;
+  pushHistory();
   if (cursor.lane === 'strum') {
     doc.columns[c].strum = '';
   } else {
@@ -1033,27 +1179,119 @@ canvas.addEventListener('mousedown', (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
+  const mh = markerHit(mx, my);
+  if (mh && mh.marker) {
+    // Single click: jump cursor. Double click: rename.
+    cursor.col = clamp(mh.col, 0, doc.columns.length - 1);
+    if (e.detail >= 2) {
+      const name = prompt('Rename marker', mh.marker.name || '');
+      if (name !== null) {
+        pushHistory();
+        const nm = String(name).trim();
+        if (nm) mh.marker.name = nm;
+      }
+    }
+    render();
+    return;
+  }
   const hit = canvasToCell(mx, my);
   if (!hit) return;
 
-  clearDigitBuffer();
+  // Begin possible drag-selection (columns). We only commit to selection if the
+  // pointer moves horizontally beyond a small threshold.
+  _mouseDown = true;
+  _dragging = false;
+  _downHit = hit;
+  _downX = mx;
+  _downY = my;
 
-  cursor.col = hit.col;
-  if (hit.lane === 'strum') {
-    cursor.lane = 'strum';
-  } else {
-    cursor.lane = 'tab';
-    cursor.row = hit.row ?? 0;
-  }
-  render();
+  // Don't clear existing selection yet; allow click (no drag) to behave exactly as before.
 });
 
-canvas.addEventListener('mousemove', (e) => {
-  if (doc.view.notesMode !== 'hover') { hideTooltip(); return; }
 
+// Right-click marker to delete (no confirmation)
+canvas.addEventListener('contextmenu', (e) => {
   const rect = canvas.getBoundingClientRect();
   const mx = e.clientX - rect.left;
   const my = e.clientY - rect.top;
+  const mh = markerHit(mx, my);
+  if (mh && mh.marker) {
+    e.preventDefault();
+    pushHistory();
+    ensureMarkers();
+    doc.markers = doc.markers.filter(m => m && (mh.marker.id ? m.id !== mh.marker.id : m !== mh.marker));
+    render();
+    return;
+  }
+});
+window.addEventListener('mouseup', (e) => {
+  if (!_mouseDown) return;
+  _mouseDown = false;
+
+  // If we did not drag, treat this as a normal click-to-cursor.
+  if (!_dragging && _downHit) {
+    clearDigitBuffer();
+
+    // Keep an existing column selection when clicking inside it (DAW-style),
+    // but clear it when clicking outside the selected range.
+    if (colSel) {
+      const a = Math.min(colSel.startCol, colSel.endCol);
+      const b = Math.max(colSel.startCol, colSel.endCol);
+      if (_downHit.col < a || _downHit.col > b) {
+        clearColSel();
+      }
+    }
+
+    cursor.col = _downHit.col;
+    if (_downHit.lane === 'strum') {
+      cursor.lane = 'strum';
+    } else {
+      cursor.lane = 'tab';
+      cursor.row = _downHit.row ?? 0;
+    }
+    render();
+  }
+
+  _dragging = false;
+  _downHit = null;
+});
+
+// Mouse move: either drag-select columns (snap) or show hover tooltip (existing behavior)
+canvas.addEventListener('mousemove', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // Drag-select columns
+  if (_mouseDown && _downHit) {
+    const dx = mx - _downX;
+    const dy = my - _downY;
+    if (!_dragging) {
+      // Commit to drag-selection when movement exceeds a small threshold in ANY direction.
+      // (Allows vertical drags to select a single column without requiring horizontal motion.)
+      if (Math.abs(dx) >= _DRAG_THRESH_PX || Math.abs(dy) >= _DRAG_THRESH_PX) {
+        _dragging = true;
+        // Start new selection at the mousedown column
+        colSel = { startCol: _downHit.col, endCol: _downHit.col };
+      }
+    }
+
+    if (_dragging) {
+      const hit = canvasToCell(mx, my);
+      if (hit) {
+        const a = Math.min(_downHit.col, hit.col);
+        const b = Math.max(_downHit.col, hit.col);
+        colSel = { startCol: a, endCol: b };
+        hideTooltip();
+        render();
+      }
+      return;
+    }
+  }
+
+  // Hover tooltip (unchanged)
+  if (doc.view.notesMode !== 'hover') { hideTooltip(); return; }
+
   const hit = canvasToCell(mx, my);
   if (!hit || hit.lane !== 'tab') { hideTooltip(); return; }
 
@@ -1077,6 +1315,12 @@ canvas.addEventListener('mouseleave', () => hideTooltip());
 
 // Keyboard events
 window.addEventListener('keydown', (e) => {
+
+  // Column range selection (Step 1)
+  if (e.key === 'Escape') {
+    if (colSel) { clearColSel(); render(); }
+    return;
+  }
   // Undo/redo
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault();
@@ -1088,6 +1332,71 @@ window.addEventListener('keydown', (e) => {
     redo();
     return;
   }
+  // Clipboard (Step 2)
+  if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+    const ae = document.activeElement;
+    const tag = ae ? ae.tagName : '';
+    const isText = ae && (tag === 'INPUT' || tag === 'TEXTAREA' || ae.isContentEditable);
+    if (!isText) {
+      const k = e.key.toLowerCase();
+      const getSel = () => {
+        if (colSel) return { start: Math.min(colSel.startCol, colSel.endCol), end: Math.max(colSel.startCol, colSel.endCol) };
+        return null;
+      };
+      if (k === 'c') {
+        const r = getSel();
+        if (!r) return; // nothing selected
+        e.preventDefault();
+        colClip = deepClone(doc.columns.slice(r.start, r.end + 1));
+        return;
+      }
+      if (k === 'x') {
+        const r = getSel();
+        if (!r) return;
+        e.preventDefault();
+        pushHistory();
+        colClip = deepClone(doc.columns.slice(r.start, r.end + 1));
+        const removedCount = (r.end - r.start + 1);
+        doc.columns.splice(r.start, removedCount);
+        removeMarkersInRange(r.start, r.end);
+        shiftMarkers(r.end + 1, -removedCount);
+        if (doc.columns.length === 0) doc.columns.push({ notes: {}, strum: '' });
+        cursor.col = clamp(r.start, 0, doc.columns.length - 1);
+        clearColSel();
+        render();
+        return;
+      }
+      if (k === 'v') {
+        if (!hasClip()) return;
+        e.preventDefault();
+        pushHistory();
+        const r = getSel();
+        const insertAt = r ? r.start : clamp(cursor.col, 0, doc.columns.length);
+        const payload = deepClone(colClip);
+        doc.columns.splice(insertAt, 0, ...payload);
+        shiftMarkers(insertAt, payload.length);
+        colSel = { startCol: insertAt, endCol: insertAt + payload.length - 1 };
+        cursor.col = clamp(insertAt, 0, doc.columns.length - 1);
+        render();
+        return;
+      }
+      if (k === 'd') {
+        e.preventDefault();
+        pushHistory();
+        let r = getSel();
+        if (!r) r = { start: cursor.col, end: cursor.col };
+        const payload = deepClone(doc.columns.slice(r.start, r.end + 1));
+        const insertAt = clamp(r.end + 1, 0, doc.columns.length);
+        doc.columns.splice(insertAt, 0, ...payload);
+        shiftMarkers(insertAt, payload.length);
+        colSel = { startCol: insertAt, endCol: insertAt + payload.length - 1 };
+        cursor.col = clamp(insertAt, 0, doc.columns.length - 1);
+        render();
+        return;
+      }
+    }
+  }
+
 
   // Mode toggles
   if (!e.ctrlKey && !e.metaKey) {
@@ -1161,6 +1470,39 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Delete') {
     e.preventDefault();
     clearDigitBuffer();
+
+    // If a column-range selection exists, erase it.
+    if (colSel) {
+      pushHistory();
+      const a0 = Math.min(colSel.startCol, colSel.endCol);
+      const b0 = Math.max(colSel.startCol, colSel.endCol);
+
+      // 1) Remove divider columns inside the selection (structural delete)
+      for (let i = b0; i >= a0; i--) {
+        if (doc.columns[i] && doc.columns[i].divider) {
+          doc.columns.splice(i, 1);
+          shiftMarkers(i, -1);
+        }
+      }
+
+      // 2) Clear contents of remaining columns that were in the original selection span
+      // (after divider deletions, indices may have shifted; we re-compute a safe span)
+      const a = clamp(a0, 0, doc.columns.length - 1);
+      const b = clamp(b0, 0, doc.columns.length - 1);
+
+      for (let i = a; i <= b; i++) {
+        const col = doc.columns[i];
+        if (!col || col.divider) continue;
+        col.strum = '';
+        col.notes = {};
+      }
+
+      cursor.col = clamp(a, 0, doc.columns.length - 1);
+      render();
+      return;
+    }
+
+    // No range selection: normal delete behavior (cell-level)
     clearCell();
     return;
   }
@@ -1370,7 +1712,8 @@ openFile.addEventListener('change', async () => {
       }
     }
 
-    doc = parsed;
+    if (!parsed.markers) parsed.markers = [];
+doc = parsed;
     history = [];
     future = [];
     cursor = { lane:'tab', row:0, col:0 };
@@ -1408,6 +1751,38 @@ addColsBtn.addEventListener('click', () => {
   }
 });
 
+
+addDividerBtn.addEventListener('click', () => {
+  pushHistory();
+  const sel = colSel ? { start: Math.min(colSel.startCol, colSel.endCol) } : null;
+  const at = sel ? sel.start : clamp(cursor.col, 0, doc.columns.length);
+  doc.columns.splice(at, 0, { notes: {}, strum: '', divider: true });
+  shiftMarkers(at, 1);
+  cursor.col = clamp(at, 0, doc.columns.length - 1);
+  colSel = { startCol: at, endCol: at };
+  render();
+});
+
+addMarkerBtn.addEventListener('click', () => {
+  ensureMarkers();
+  const sel = colSel ? { start: Math.min(colSel.startCol, colSel.endCol) } : null;
+  const at = sel ? sel.start : clamp(cursor.col, 0, doc.columns.length - 1);
+  // if marker exists at column, rename it
+  let existing = doc.markers.find(m => m && m.col === at);
+  const name = prompt(existing ? 'Rename marker' : 'Marker name', existing ? (existing.name || '') : '');
+  if (name === null) return;
+  const nm = String(name).trim();
+  if (!nm) return;
+  pushHistory();
+  if (existing) {
+    existing.name = nm;
+  } else {
+    doc.markers.push({ id: nextMarkerId(), name: nm, col: at });
+  }
+  render();
+});
+
+
 exportBtn.addEventListener('click', () => {
   const ascii = exportAscii();
   const name = (doc.meta.title || 'untitled').replace(/[^a-z0-9_-]+/gi, '_');
@@ -1428,7 +1803,8 @@ function exportAscii() {
   if (hasStrum) {
     let s = '    '; // left padding to roughly align above strings
     for (let i = 0; i < doc.columns.length; i++) {
-      const tok = (doc.columns[i].strum || '').trim();
+      const col = doc.columns[i];
+      const tok = (col && col.divider) ? '|' : (col.strum || '').trim();
       s += padToken(tok, widths[i]);
     }
     lines.push(s);
@@ -1437,7 +1813,8 @@ function exportAscii() {
   for (const stringLabel of doc.instrument.strings) {
     let line = `${stringLabel}|`;
     for (let i = 0; i < doc.columns.length; i++) {
-      const tok = (doc.columns[i].notes[stringLabel] || '').trim();
+      const col = doc.columns[i];
+      const tok = (col && col.divider) ? '|' : (col.notes[stringLabel] || '').trim();
       line += padToken(tok, widths[i]);
     }
     line += '|';
@@ -1471,7 +1848,7 @@ function applyTheme(theme, persist=true) {
   document.body.dataset.theme = t;
   if (themeNameEl) themeNameEl.textContent = themeLabel(t);
   if (subtitleEl) subtitleEl.textContent = `${themeLabel(t)} · v${APP_VERSION}`;
-  if (footerMetaEl) footerMetaEl.textContent = `Tabd v${APP_VERSION} · © 2026 TaoTech LLC`;
+  if (footerMetaEl) footerMetaEl.textContent = `Tabd v${APP_VERSION} · © 2026 Rumstok`;
   if (persist) {
     try { localStorage.setItem(LS_THEME, t); } catch (_) {}
   }
@@ -1599,4 +1976,3 @@ updateModeBadge();
 window.addEventListener('resize', () => render());
 
 render();
-
