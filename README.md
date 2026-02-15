@@ -114,7 +114,7 @@ Plain ASCII tablature suitable for printing or sharing.
 Tabd is an evolving project.  
 Thoughts, suggestions, or quality-of-life ideas are always welcome.
 
-📧 **tabd@rumstok.com**
+📧 **projects@rumstok.com**
 
 ---
 

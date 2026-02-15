@@ -300,6 +300,8 @@ const saveBtn = document.getElementById('saveBtn');
 const openBtn = document.getElementById('openBtn');
 const exportBtn = document.getElementById('exportBtn');
 const addColsBtn = document.getElementById('addColsBtn');
+const insertColBtn = document.getElementById('insertColBtn');
+const deleteColBtn = document.getElementById('deleteColBtn');
 const addDividerBtn = document.getElementById('addDividerBtn');
 const addMarkerBtn = document.getElementById('addMarkerBtn');
 const openFile = document.getElementById('openFile');
@@ -1749,6 +1751,43 @@ addColsBtn.addEventListener('click', () => {
     const pad = 80;
     if (targetX > viewLeft + viewW - pad) canvasWrap.scrollLeft = Math.max(0, targetX - (viewW - pad));
   }
+});
+
+
+
+insertColBtn && insertColBtn.addEventListener('click', () => {
+  pushHistory();
+  const hasSel = colSel && Number.isInteger(colSel.startCol) && Number.isInteger(colSel.endCol);
+  const start = hasSel ? Math.min(colSel.startCol, colSel.endCol) : cursor.col;
+  const pos = clamp(start, 0, doc.columns.length);
+  doc.columns.splice(pos, 0, { notes: {}, strum: '' });
+  shiftMarkers(pos, +1);
+  cursor.col = clamp(pos, 0, doc.columns.length - 1);
+  render();
+});
+
+deleteColBtn && deleteColBtn.addEventListener('click', () => {
+  const hasSel = colSel && Number.isInteger(colSel.startCol) && Number.isInteger(colSel.endCol);
+  let start, end;
+  if (hasSel) {
+    start = Math.min(colSel.startCol, colSel.endCol);
+    end = Math.max(colSel.startCol, colSel.endCol);
+  } else {
+    start = cursor.col;
+    end = cursor.col;
+  }
+  start = clamp(start, 0, doc.columns.length - 1);
+  end = clamp(end, 0, doc.columns.length - 1);
+  const count = (end - start + 1);
+  if (count <= 0) return;
+  pushHistory();
+  doc.columns.splice(start, count);
+  removeMarkersInRange(start, end);
+  shiftMarkers(end + 1, -count);
+  if (doc.columns.length === 0) doc.columns.push({ notes: {}, strum: '' });
+  cursor.col = clamp(start, 0, doc.columns.length - 1);
+  clearColSel();
+  render();
 });
 
 
